@@ -17,8 +17,6 @@ extern "C"
 #define SCL 16
 #define rst_s0 17
 #define rst_s1 15
-#define ent_sensor 39
-#define sd_sensor 5
 
 /*Variaveis Apontamento*/
 int slave[2] = {0x32, 0x42};
@@ -27,7 +25,7 @@ int pin_reset[2] = {rst_s0, rst_s1};
 int log_reset[2] = {0, 0};
 
 char dado[50];
-String apontamentos;
+String apontamentos, inf_apt;
 int conta = 0, ativo;
 
 int tam_slave = sizeof(slave) / sizeof(int);
@@ -40,7 +38,7 @@ int ip[] = {0, 0, 0, 0};
 int gateway[] = {0, 0, 0, 0};
 int subnet[] = {0, 0, 0, 0};
 // TQL - tempo que define a quebra de lotes
-int id_prxlote = 0, priFila = 0, TQL = 5000, limiteVetor = 500;
+int id_prxlote = 0, priFila = 0, TQL = 60000, limiteVetor = 500;
 long int loops = 0;
 String StatusWifi, s_aux = "", sinalWifi;
 String lotes[500] = {"", "", ""};
@@ -178,14 +176,8 @@ void escravo(int slave)
             Serial.print(slave, HEX);
             Serial.print(" - Dado: ");
             Serial.println(dado);
-            if (apontamentos.length() <= 0)
-              apontamentos = dado;
-            else
-            {
-              if (apontamentos != dado)
-                apontamentos = dado;
-            }
-            dado[0] = '\0';
+            inf_apt = apontamentos = dado;
+            dado[0] = '\0'; //Lmpar a variavel para que possa ser usada novamento
           }
         }
         else //nao chegou toda as informações
@@ -308,245 +300,278 @@ void loopWatchDog()
 
 time_t getTime_t()
 {
-    return timeServer + time(nullptr) - timeServerResetNullptr;
+  return timeServer + time(nullptr) - timeServerResetNullptr;
 }
 
 void loopWifiServer()
 {
-    try
-    {
-        server.handleClient(); //Resposta do servidor
-    }
-    catch (...)
-    {
-        resetModule();
-    }
+  try
+  {
+    server.handleClient(); //Resposta do servidor
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 void WiFiEvent(WiFiEvent_t event)
 {
-    switch (event)
-    {
+  switch (event)
+  {
     case SYSTEM_EVENT_ETH_START:
-        Serial.println("ETH Started");
-        //set eth hostname here
-        ETH.setHostname("esp32-ethernet");
-        break;
+      Serial.println("ETH Started");
+      //set eth hostname here
+      ETH.setHostname("esp32-ethernet");
+      break;
     case SYSTEM_EVENT_ETH_CONNECTED:
-        Serial.println("ETH Connected");
-        break;
+      Serial.println("ETH Connected");
+      break;
     case SYSTEM_EVENT_ETH_GOT_IP:
-        Serial.print("ETH MAC: ");
-        Serial.print(ETH.macAddress());
-        Serial.print(", IPv4: ");
-        Serial.print(ETH.localIP());
-        if (ETH.fullDuplex())
-        {
-            Serial.print(", FULL_DUPLEX");
-        }
-        Serial.print(", ");
-        Serial.print(ETH.linkSpeed());
-        Serial.println("Mbps");
-        eth_connected = true;
-        break;
+      Serial.print("ETH MAC: ");
+      Serial.print(ETH.macAddress());
+      Serial.print(", IPv4: ");
+      Serial.print(ETH.localIP());
+      if (ETH.fullDuplex())
+      {
+        Serial.print(", FULL_DUPLEX");
+      }
+      Serial.print(", ");
+      Serial.print(ETH.linkSpeed());
+      Serial.println("Mbps");
+      eth_connected = true;
+      break;
     case SYSTEM_EVENT_ETH_DISCONNECTED:
-        Serial.println("ETH Disconnected");
-        eth_connected = false;
-        break;
+      Serial.println("ETH Disconnected");
+      eth_connected = false;
+      break;
     case SYSTEM_EVENT_ETH_STOP:
-        Serial.println("ETH Stopped");
-        eth_connected = false;
-        break;
+      Serial.println("ETH Stopped");
+      eth_connected = false;
+      break;
     default:
-        break;
-    }
+      break;
+  }
 }
 
 //inicializa os lotes com '.'
 void setupParametros()
 {
-    try
+  try
+  {
+    int i = 0;
+    for (i = 0; i < limiteVetor; i++)
     {
-        int i = 0;
-        for (i = 0; i < limiteVetor; i++)
-        {
-            lotes[i] = ".";
-        }
-        id_prxlote = 0;
-        priFila = 0;
+      lotes[i] = ".";
     }
-    catch (...)
-    {
-        resetModule();
-    }
+    id_prxlote = 0;
+    priFila = 0;
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 void handleRoot()
 {
-    try
+  try
+  {
+    xSemaphoreTake(httpMutex, portMAX_DELAY);
+    String Cmd = "";
+    if (server.arg("cmd") == "reset")
     {
-        xSemaphoreTake(httpMutex, portMAX_DELAY);
-        String Cmd = "";
-        if (server.arg("cmd") == "reset")
-        {
-            server.sendHeader("Connection", "close");
-            server.send(200, "text/html", "OK");
-            delay(2000);
-            resetModule();
-        }
-        String serverIndex =
-            "<br> Milisegundos:  " + String(millis()) + " "
-                                                        "<br> Clock:  " +
-            String(clock()) + " "
-                              "<br> Dado: " +
-            String(apontamentos) + " "
-
-                                   "<br><script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
-                                   "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
-                                   "<input type='file' name='update'>"
-                                   "<input type='submit' value='Update'>"
-                                   "</form>"
-                                   "<div id='prg'>progress: 0%</div>"
-                                   "<script>"
-                                   "$('form').submit(function(e){"
-                                   "e.preventDefault();"
-                                   "var form = $('#upload_form')[0];"
-                                   "var data = new FormData(form);"
-                                   " $.ajax({"
-                                   "url: '/update',"
-                                   "type: 'POST',"
-                                   "data: data,"
-                                   "contentType: false,"
-                                   "processData:false,"
-                                   "xhr: function() {"
-                                   "var xhr = new window.XMLHttpRequest();"
-                                   "xhr.upload.addEventListener('progress', function(evt) {"
-                                   "if (evt.lengthComputable) {"
-                                   "var per = evt.loaded / evt.total;"
-                                   "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
-                                   "}"
-                                   "}, false);"
-                                   "return xhr;"
-                                   "},"
-                                   "success:function(d, s) {"
-                                   "console.log('success!')"
-                                   "},"
-                                   "error: function (a, b, c) {"
-                                   "}"
-                                   "});"
-                                   "});"
-                                   "</script>";
-
-        xSemaphoreGive(httpMutex);
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", serverIndex);
+      server.sendHeader("Connection", "close");
+      server.send(200, "text/html", "OK");
+      delay(2000);
+      resetModule();
     }
-    catch (...)
-    {
-        resetModule();
-    }
+    String serverIndex =
+      "<br> Milisegundos:  " + String(millis()) + " "
+      "<br> Clock:  " +
+      String(clock()) + " "
+      "<br> Dado: " +
+      String(inf_apt) + " "
+
+      "<br><script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+      "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+      "<input type='file' name='update'>"
+      "<input type='submit' value='Update'>"
+      "</form>"
+      "<div id='prg'>progress: 0%</div>"
+      "<script>"
+      "$('form').submit(function(e){"
+      "e.preventDefault();"
+      "var form = $('#upload_form')[0];"
+      "var data = new FormData(form);"
+      " $.ajax({"
+      "url: '/update',"
+      "type: 'POST',"
+      "data: data,"
+      "contentType: false,"
+      "processData:false,"
+      "xhr: function() {"
+      "var xhr = new window.XMLHttpRequest();"
+      "xhr.upload.addEventListener('progress', function(evt) {"
+      "if (evt.lengthComputable) {"
+      "var per = evt.loaded / evt.total;"
+      "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+      "}"
+      "}, false);"
+      "return xhr;"
+      "},"
+      "success:function(d, s) {"
+      "console.log('success!')"
+      "},"
+      "error: function (a, b, c) {"
+      "}"
+      "});"
+      "});"
+      "</script>";
+
+    xSemaphoreGive(httpMutex);
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", serverIndex);
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 //pagina que retorna a lista de lotes pendentes de envio
 void handlegetLotes()
 {
-    try
-    {
-        String html = "", s_aux1 = "";
-        //const char* c_aux;
-        int i = 0;
-        timeServerAtu = server.arg("d").toInt();
-        timeServerAtuRn = time(nullptr);
-        timeServerDif = getTime_t() - timeServerAtu;
+  try
+  {
+    String html = "", s_aux1 = "";
+    //const char* c_aux;
+    int i = 0;
+    timeServerAtu = server.arg("d").toInt();
+    timeServerAtuRn = time(nullptr);
+    timeServerDif = getTime_t() - timeServerAtu;
 
-        if (server.arg("tql") != "")
-        {
-            TQL = server.arg("tql").toInt() * 1000;
-        }
-
-        if (timeServer == 0)
-        {
-            timeServer = server.arg("d").toInt();
-            timeServerResetNullptr = time(nullptr);
-            s_aux = "|Data Atualizada:" + String(timeServer);
-            c_aux = s_aux.c_str();
-        }
-        else
-        {
-            if (server.arg("at").toInt() == 1)
-            {
-                timeServer = server.arg("d").toInt();
-                timeServerResetNullptr = time(nullptr);
-            }
-        }
-        // codigo do lote
-        xSemaphoreTake(httpMutex, portMAX_DELAY);
-        for (i = 0; i < limiteVetor; i++)
-        {
-            if (lotes[i] != ".")
-            {
-                html += lotes[i];
-            }
-        }
-        xSemaphoreGive(httpMutex);
-        if (html == "") //nao existe lotes e o confirma lotes sera acionado  do contrario o confirma lotes sao acionados quando existe uma delecao de registros assim aumentando a seguranca do metodo contingencia
-        {
-            tConfirmLote = clock(); // esta variavel indica se o sistema esta sem comunicacao e serve para entrar em modo critico de operacao e criacao de lotes
-        }
-        // envia logs no fim da cominucacao
-        html += "logs#" + String(((temprature_sens_read() - 32) / 1.8)) + "#" + String(hallRead()) + "#" + sinalWifi;
-        //hallRead - MEDE A INTERFERENCIA ELETRO MAGNETICA
-        server.setContentLength(html.length());
-        server.send(200, "text/html", html);
-    }
-    catch (...)
+    if (server.arg("tql") != "")
     {
-        resetModule();
+      TQL = server.arg("tql").toInt() * 1000;
     }
+
+    if (timeServer == 0)
+    {
+      timeServer = server.arg("d").toInt();
+      timeServerResetNullptr = time(nullptr);
+      s_aux = "|Data Atualizada:" + String(timeServer);
+      c_aux = s_aux.c_str();
+    }
+    else
+    {
+      if (server.arg("at").toInt() == 1)
+      {
+        timeServer = server.arg("d").toInt();
+        timeServerResetNullptr = time(nullptr);
+      }
+    }
+    // codigo do lote
+    xSemaphoreTake(httpMutex, portMAX_DELAY);
+    for (i = 0; i < limiteVetor; i++)
+    {
+      if (lotes[i] != ".")
+      {
+        html += lotes[i];
+      }
+    }
+    xSemaphoreGive(httpMutex);
+    if (html == "") //nao existe lotes e o confirma lotes sera acionado  do contrario o confirma lotes sao acionados quando existe uma delecao de registros assim aumentando a seguranca do metodo contingencia
+    {
+      tConfirmLote = clock(); // esta variavel indica se o sistema esta sem comunicacao e serve para entrar em modo critico de operacao e criacao de lotes
+    }
+    // envia logs no fim da cominucacao
+    html += "logs#" + String(((temprature_sens_read() - 32) / 1.8)) + "#" + String(hallRead()) + "#" + sinalWifi;
+    //hallRead - MEDE A INTERFERENCIA ELETRO MAGNETICA
+    server.setContentLength(html.length());
+    server.send(200, "text/html", html);
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 void handleconfirmLotes()
 {
-    try
+  try
+  {
+    String s_aux = server.arg("l");
+    if (s_aux != "")
     {
-        String s_aux = server.arg("l");
-        if (s_aux != "")
+      String s_aux1 = "";
+      int l = s_aux.length();
+      int x = 0;
+      for (x = 0; x < l; x++)
+      {
+        if (s_aux[x] == '.')
         {
-            String s_aux1 = "";
-            int l = s_aux.length();
-            int x = 0;
-            for (x = 0; x < l; x++)
-            {
-                if (s_aux[x] == '.')
-                {
-                    if (s_aux1 != "")
-                    {
-                        // apaga arquivo
-                        lotes[s_aux1.toInt()] = ".";
-                        xSemaphoreTake(httpMutex, portMAX_DELAY);
-                        priFila = s_aux1.toInt() + 1;
-                        xSemaphoreGive(httpMutex);
-                        s_aux1 = "";
-                    }
-                }
-                else
-                {
-                    s_aux1 += s_aux[x];
-                }
-            }
+          if (s_aux1 != "")
+          {
+            // apaga arquivo
+            lotes[s_aux1.toInt()] = ".";
+            xSemaphoreTake(httpMutex, portMAX_DELAY);
+            priFila = s_aux1.toInt() + 1;
+            xSemaphoreGive(httpMutex);
+            s_aux1 = "";
+          }
         }
         else
         {
-            s_aux = "Zero lotes enviados";
+          s_aux1 += s_aux[x];
         }
-        tConfirmLote = clock();
-        server.setContentLength(s_aux.length());
-        server.send(200, "text/html", s_aux);
+      }
     }
-    catch (...)
+    else
     {
-        resetModule();
+      s_aux = "Zero lotes enviados";
     }
+    tConfirmLote = clock();
+    server.setContentLength(s_aux.length());
+    server.send(200, "text/html", s_aux);
+  }
+  catch (...)
+  {
+    resetModule();
+  }
+}
+
+bool procura_AptLote(String apt)
+{
+    if (id_prxlote > 0)
+    {
+        char sub[255];
+        int pos = 0;
+        String atual = lotes[id_prxlote - 1]; //ultimo lote
+        for (int a = 0; a < atual.length() && lotes[id_prxlote - 1] != "."; a++)
+        {
+            if (atual[a] != '|')
+                sub[pos++] = atual[a];
+            else
+            {
+                sub[pos++] = atual[a]; //Para adiciona o pipe
+                sub[pos] = '\0';       //para que se torne uma string legivel
+
+                if (apt.compareTo(sub) == 0)
+                {
+                    //Serial.println("encontrou apontamente no lote ultimo");
+                    return true; //encontrou o apontamento no ultimo lote
+                }
+                else
+                {
+                    sub[0] = '\0'; //para garantir que limpou
+                    pos = 0;
+                }
+            }
+        }
+        return false;
+    }
+    return false;
 }
 
 void gravaLote()
@@ -561,11 +586,11 @@ void gravaLote()
                 timeServer = timeServer - (TQL / 1000);
             else
                 timeServer = timeServer - timeServerDif;
-            //return false;
         }
 
         if (timeServer != 0)
-        {                         // grava lote pois esta com data atualizada
+        {
+            // grava lote pois esta com data atualizada
             if (timeFimLote == 0) // siginifica que a data atualizou a variavel timeServer pore ainda nao atualizou a variavel timeFimLote   ai vou calcular as datas para nao mandar 1970 porem todo o tempo que o esp ficar desligado nao tera atualizacao
                 timeIniLote = timeServer;
             else
@@ -578,11 +603,8 @@ void gravaLote()
                 timeServer = timeServerAtu;
                 timeServerDif = 0;
             }
-
             timeFimLote = getTime_t();
             dattime = localtime(&timeIniLote);
-            
-
             // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
             if (id_prxlote == limiteVetor)
             {
@@ -590,24 +612,48 @@ void gravaLote()
             }
             dattime = localtime(&timeFimLote);
             String s_aux1 = apontamentos + "|";
-            //Procurar nos lotes se ja tem o apontamento.
-            if(sizeof(lotes[id_prxlote]) - sizeof(s_aux1) < 0 || (lotes[id_prxlote] != s_aux1 && lotes[id_prxlote].substring(sizeof(lotes[id_prxlote]) - sizeof(s_aux1), sizeof(lotes[id_prxlote])) != s_aux1))//verificar substring
+            //o indice do lotes é maior que 0 E o s_aux1 tem o codigo de barras E o
+            //procura lotes nao encontrou esse codigo de barras no ultimo lote
+            if (s_aux1.length() > 1 && !procura_AptLote(s_aux1))
             {
-              if(lotes[id_prxlote] == ".")
-              {
-                lotes[id_prxlote] = s_aux1;
-              }
-              else
-              {
-                lotes[id_prxlote] += s_aux1;
-              }
-              
-              if ((clock() - tConfirmLote < TQL) || sizeof(lotes[id_prxlote]) + sizeof(s_aux1) > 255)
-              {//Nao esta em contigencia, ou atingiu o tamanho limite do lote
-                id_prxlote = id_prxlote + 1;
-              }
+                //Serial.println("nao encontrou apontamente no ultimo lote");
+                if (lotes[id_prxlote] == ".")
+                {
+                    lotes[id_prxlote] = s_aux1;
+                    //Serial.println("gravou apontamento no lote e nao esta em contigencia");
+                }
+                else
+                {
+                    lotes[id_prxlote] += s_aux1;
+                    //Serial.println("gravou apontamento no lote e esta em contigencia");
+                }
+                //Nao esta em contigencia, ou atingiu o tamanho limite do lote
+                if ((clock() - tConfirmLote < TQL) || lotes[id_prxlote].length() > 255)
+                {
+                    id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
+                }
             }
-            
+            else
+            {
+                //s_aux1 tem o codigo de barras E esta em contigencia
+                if (s_aux1.length() > 1 && clock() - tConfirmLote > TQL)
+                {
+                    //verifica se o tamanho do ultimo lote mais o lote atual estoura a memoria
+                    if (lotes[id_prxlote].length() + s_aux1.length() > 255)
+                    {
+                        id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
+                    }
+                    if (lotes[id_prxlote] == ".")
+                    {
+                        lotes[id_prxlote] = s_aux1;
+                    }
+                    else
+                    {
+                        lotes[id_prxlote] += s_aux1;
+                    }
+                }
+            }
+            apontamentos.clear();
         }
     }
     catch (...)
@@ -616,108 +662,110 @@ void gravaLote()
     }
 }
 
+
 void handlelog()
 {
-    try
+  try
+  {
+    xSemaphoreTake(httpMutex, portMAX_DELAY);
+    String html = "";
+    int i = 0;
+    html += "<h1><BR>VARIAVEIS... </h1>";
+    /*########################################### VARIAVEIS DE CONFIGURACAO ################################################*/
+    html += "  millis()             =" + String(millis()) + "<br>";
+    //html += "  ipMaquina            =" + String(ETH.localIP()) + "<br>";
+    html += "  TQL                  =" + String(TQL) + "<br>";
+    html += "  c_aux                =" + String(c_aux) + "<br>";
+    html += "  s_aux                =" + String(s_aux) + "<br>";
+    html += "  id_prxlote           =" + String(id_prxlote) + "<br>";
+    html += " priFila               =" + String(priFila) + "<br>";
+    html += " loops                 =" + String(loops) + "<br>";
+    html += " tConfirmLote          =" + String(tConfirmLote) + "<br>";
+    html += " ttimeUltLote          =" + String(ttimeUltLote) + "<br>";
+    html += " timeServer            =" + String(timeServer) + "<br>";
+    html += " timeNow               =" + String(timeNow) + "<br>";
+    html += " timeFimLote           =" + String(timeFimLote) + "<br>";
+    html += " timeIniLote           =" + String(timeIniLote) + "<br>";
+    //html += " StatusWifi            =" + String(StatusWifi) + "<br>";
+    //html += " sinalWifi            =" + String(sinalWifi) + "<br>";
+    //VETORES
+    for (i = 0; i < limiteVetor; i++)
     {
-        xSemaphoreTake(httpMutex, portMAX_DELAY);
-        String html = "";
-        int i = 0;
-        html += "<h1><BR>VARIAVEIS... </h1>";
-        /*########################################### VARIAVEIS DE CONFIGURACAO ################################################*/
-        html += "  millis()             =" + String(millis()) + "<br>";
-        //html += "  ipMaquina            =" + String(ETH.localIP()) + "<br>";
-        html += "  TQL                  =" + String(TQL) + "<br>";
-        html += "  c_aux                =" + String(c_aux) + "<br>";
-        html += "  s_aux                =" + String(s_aux) + "<br>";
-        html += "  id_prxlote           =" + String(id_prxlote) + "<br>";
-        html += " priFila               =" + String(priFila) + "<br>";
-        html += " loops                 =" + String(loops) + "<br>";
-        html += " tConfirmLote          =" + String(tConfirmLote) + "<br>";
-        html += " ttimeUltLote          =" + String(ttimeUltLote) + "<br>";
-        html += " timeServer            =" + String(timeServer) + "<br>";
-        html += " timeNow               =" + String(timeNow) + "<br>";
-        html += " timeFimLote           =" + String(timeFimLote) + "<br>";
-        html += " timeIniLote           =" + String(timeIniLote) + "<br>";
-        //html += " StatusWifi            =" + String(StatusWifi) + "<br>";
-        //html += " sinalWifi            =" + String(sinalWifi) + "<br>";
-        //VETORES
-        for (i = 0; i < limiteVetor; i++)
-        {
-            if (lotes[i] != ".")
-            {
-                html += "lote[" + String(i) + "]    = " + lotes[i] + "<br>";
-            }
-        }
-
-        server.setContentLength(html.length());
-        server.send(20000, "text/html", html);
-
-        xSemaphoreGive(httpMutex);
+      if (lotes[i] != ".")
+      {
+        html += "lote[" + String(i) + "]    = " + lotes[i] + "<br>";
+      }
     }
-    catch (...)
-    {
-        resetModule();
-    }
+
+    server.setContentLength(html.length());
+    server.send(20000, "text/html", html);
+
+    xSemaphoreGive(httpMutex);
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 void handleResetSlave()
 {
-    try
+  try
+  {
+    xSemaphoreTake(httpMutex, portMAX_DELAY);
+    String Cmd = "";
+    if (server.arg("cmd") == "reset")
     {
-        xSemaphoreTake(httpMutex, portMAX_DELAY);
-        String Cmd = "";
-        if (server.arg("cmd") == "reset")
-        {
-            server.sendHeader("Connection", "close");
-            server.send(200, "text/html", "OK");
-            delay(2000);
-            resetModule();
-        }
-
-        String serverIndex =
-            "<br> Quantidade de resete slave 0: " + String(log_reset[0]) + " "
-                                                                           "<br> Quantidade de resete slave 1: " +
-            String(log_reset[1]) + " ";
-
-        xSemaphoreGive(httpMutex);
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", serverIndex);
+      server.sendHeader("Connection", "close");
+      server.send(200, "text/html", "OK");
+      delay(2000);
+      resetModule();
     }
-    catch (...)
-    {
-        resetModule();
-    }
+
+    String serverIndex =
+      "<br> Quantidade de resete slave 0: " + String(log_reset[0]) + " "
+      "<br> Quantidade de resete slave 1: " +
+      String(log_reset[1]) + " ";
+
+    xSemaphoreGive(httpMutex);
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", serverIndex);
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 void setupWifiServer()
 {
-    try
+  try
+  {
+    WiFi.onEvent(WiFiEvent);
+    ETH.begin();
+    // define IP fixo
+    if (subnet[0] > 0)
     {
-        WiFi.onEvent(WiFiEvent);
-        ETH.begin();
-        // define IP fixo
-        if (subnet[0] > 0)
-        {
-            IPAddress _ip(ip[0], ip[1], ip[2], ip[3]);
-            IPAddress _gateway(gateway[0], gateway[1], gateway[2], gateway[3]);
-            IPAddress _subnet(subnet[0], subnet[1], subnet[2], subnet[3]);
-            ETH.config(_ip, _gateway, _subnet);
-        }
+      IPAddress _ip(ip[0], ip[1], ip[2], ip[3]);
+      IPAddress _gateway(gateway[0], gateway[1], gateway[2], gateway[3]);
+      IPAddress _subnet(subnet[0], subnet[1], subnet[2], subnet[3]);
+      ETH.config(_ip, _gateway, _subnet);
+    }
 
-        //time_t timeout = millis() + 10000;
-        server.on("/", handleRoot);
-        server.on("/getLotes", handlegetLotes);
-        server.on("/confirmLotes", handleconfirmLotes);
-        server.on("/log", handlelog);
-        server.on("/reset", handleResetSlave);
-        /*handling uploading firmware file */
-        server.on(
-            "/update", HTTP_POST, []() {
+    //time_t timeout = millis() + 10000;
+    server.on("/", handleRoot);
+    server.on("/getLotes", handlegetLotes);
+    server.on("/confirmLotes", handleconfirmLotes);
+    server.on("/log", handlelog);
+    server.on("/reset", handleResetSlave);
+    /*handling uploading firmware file */
+    server.on(
+    "/update", HTTP_POST, []() {
       Serial.printf(" timerDetachInterrupt ");
       server.sendHeader("Connection", "close");
       server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
-      esp_wifi_wps_disable(); ESP.restart(); }, []() {
+      esp_wifi_wps_disable(); ESP.restart();
+    }, []() {
       HTTPUpload& upload = server.upload();
       if (upload.status == UPLOAD_FILE_START) {
         Serial.printf("Update: %s\n", upload.filename.c_str());
@@ -740,15 +788,16 @@ void setupWifiServer()
         else {
           Update.printError(Serial);
         }
-      } });
+      }
+    });
 
-        // start the server
-        server.begin();
-    }
-    catch (...)
-    {
-        resetModule();
-    }
+    // start the server
+    server.begin();
+  }
+  catch (...)
+  {
+    resetModule();
+  }
 }
 
 /*Central*/
@@ -806,9 +855,6 @@ void setup()
   try
   {
     inicia_PinMode();
-    pinMode(ent_sensor, INPUT);
-    pinMode(sd_sensor, OUTPUT);
-
     Serial.begin(115200);
     Wire.begin(SDA, SCL);
     xTaskCreatePinnedToCore(setupcoreZero, "setupcoreZero", 8192, NULL, 0, NULL, 0);
@@ -838,17 +884,10 @@ void loop()
 
     for (int i = 0; i < tam_slave; i++)
     {
-      ativo = digitalRead(ent_sensor);
-      digitalWrite(sd_sensor, ativo);
       escravo(slave[i]);
       delay(200);
     }
-
-    //TRATAMENTO PARA QUEBRAR LOTE QUANDO O ESP ESTA EM CONTINGENCIA
-    //if ((clock() - tConfirmLote < TQL) || sizeof(lotes[id_prxlote]) > 255)
-    //{
     gravaLote();
-    //}
     delay(2);
     tLoop = millis() - tLoop;
   }
