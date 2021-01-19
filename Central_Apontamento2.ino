@@ -17,12 +17,15 @@ extern "C"
 #define SCL 16
 #define rst_s0 17
 #define rst_s1 15
+#define ent_sensor 14
 
 /*Variaveis Apontamento*/
 int slave[2] = {0x32, 0x42};
 bool estado[2] = {false, false};
 int pin_reset[2] = {rst_s0, rst_s1};
 int log_reset[2] = {0, 0};
+int val_sensor;
+bool espera;
 
 char dado[50];
 String apontamentos, inf_apt;
@@ -532,6 +535,8 @@ void handleconfirmLotes()
       s_aux = "Zero lotes enviados";
     }
     tConfirmLote = clock();
+    if (id_prxlote != 0)
+      id_prxlote = id_prxlote + 1;
     server.setContentLength(s_aux.length());
     server.send(200, "text/html", s_aux);
   }
@@ -541,127 +546,78 @@ void handleconfirmLotes()
   }
 }
 
-bool procura_AptLote(String apt)
-{
-    if (id_prxlote > 0)
-    {
-        char sub[255];
-        int pos = 0;
-        String atual = lotes[id_prxlote - 1]; //ultimo lote
-        for (int a = 0; a < atual.length() && lotes[id_prxlote - 1] != "."; a++)
-        {
-            if (atual[a] != '|')
-                sub[pos++] = atual[a];
-            else
-            {
-                sub[pos++] = atual[a]; //Para adiciona o pipe
-                sub[pos] = '\0';       //para que se torne uma string legivel
-
-                if (apt.compareTo(sub) == 0)
-                {
-                    //Serial.println("encontrou apontamente no lote ultimo");
-                    return true; //encontrou o apontamento no ultimo lote
-                }
-                else
-                {
-                    sub[0] = '\0'; //para garantir que limpou
-                    pos = 0;
-                }
-            }
-        }
-        return false;
-    }
-    return false;
-}
-
 void gravaLote()
 {
-    struct tm *dattime;
-    try
-    {
-        //if (timeServerDif > 0 && CD1 <= 0 ) { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
-        if (timeServerDif > 0)
-        { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
-            if (timeServerDif > (TQL / 1000))
-                timeServer = timeServer - (TQL / 1000);
-            else
-                timeServer = timeServer - timeServerDif;
-        }
+  struct tm *dattime;
+  try
+  {
+    //if (timeServerDif > 0 && CD1 <= 0 ) { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
+    if (timeServerDif > 0)
+    { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
+      if (timeServerDif > (TQL / 1000))
+        timeServer = timeServer - (TQL / 1000);
+      else
+        timeServer = timeServer - timeServerDif;
+    }
 
-        if (timeServer != 0)
+    if (timeServer != 0)
+    {
+      // grava lote pois esta com data atualizada
+      if (timeFimLote == 0) // siginifica que a data atualizou a variavel timeServer pore ainda nao atualizou a variavel timeFimLote   ai vou calcular as datas para nao mandar 1970 porem todo o tempo que o esp ficar desligado nao tera atualizacao
+        timeIniLote = timeServer;
+      else
+        timeIniLote = timeFimLote;
+
+      //      if (timeServerDif< 0 && CD1 <= 0 ) { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
+      if (timeServerDif < 0)
+      { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
+        timeServerResetNullptr = timeServerAtuRn;
+        timeServer = timeServerAtu;
+        timeServerDif = 0;
+      }
+      timeFimLote = getTime_t();
+      dattime = localtime(&timeIniLote);
+      // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
+      if (id_prxlote == limiteVetor)
+      {
+        id_prxlote = 0;
+      }
+      dattime = localtime(&timeFimLote);
+      String s_aux1 = apontamentos + "|";
+      //o indice do lotes é maior que 0 E o s_aux1 tem o codigo de barras E o
+      //procura lotes nao encontrou esse codigo de barras no ultimo lote
+      if (s_aux1.length() > 1)
+      {
+        //atingiu o tamanho limite do lote
+        if (lotes[id_prxlote].length() + s_aux1.length() > 255)
         {
-            // grava lote pois esta com data atualizada
-            if (timeFimLote == 0) // siginifica que a data atualizou a variavel timeServer pore ainda nao atualizou a variavel timeFimLote   ai vou calcular as datas para nao mandar 1970 porem todo o tempo que o esp ficar desligado nao tera atualizacao
-                timeIniLote = timeServer;
-            else
-                timeIniLote = timeFimLote;
-
-            //      if (timeServerDif< 0 && CD1 <= 0 ) { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
-            if (timeServerDif < 0)
-            { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
-                timeServerResetNullptr = timeServerAtuRn;
-                timeServer = timeServerAtu;
-                timeServerDif = 0;
-            }
-            timeFimLote = getTime_t();
-            dattime = localtime(&timeIniLote);
-            // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
-            if (id_prxlote == limiteVetor)
-            {
-                id_prxlote = 0;
-            }
-            dattime = localtime(&timeFimLote);
-            String s_aux1 = apontamentos + "|";
-            //o indice do lotes é maior que 0 E o s_aux1 tem o codigo de barras E o
-            //procura lotes nao encontrou esse codigo de barras no ultimo lote
-            if (s_aux1.length() > 1 && !procura_AptLote(s_aux1))
-            {
-                //Serial.println("nao encontrou apontamente no ultimo lote");
-                if (lotes[id_prxlote] == ".")
-                {
-                    lotes[id_prxlote] = s_aux1;
-                    //Serial.println("gravou apontamento no lote e nao esta em contigencia");
-                }
-                else
-                {
-                    lotes[id_prxlote] += s_aux1;
-                    //Serial.println("gravou apontamento no lote e esta em contigencia");
-                }
-                //Nao esta em contigencia, ou atingiu o tamanho limite do lote
-                if ((clock() - tConfirmLote < TQL) || lotes[id_prxlote].length() > 255)
-                {
-                    id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
-                }
-            }
-            else
-            {
-                //s_aux1 tem o codigo de barras E esta em contigencia
-                if (s_aux1.length() > 1 && clock() - tConfirmLote > TQL)
-                {
-                    //verifica se o tamanho do ultimo lote mais o lote atual estoura a memoria
-                    if (lotes[id_prxlote].length() + s_aux1.length() > 255)
-                    {
-                        id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
-                    }
-                    if (lotes[id_prxlote] == ".")
-                    {
-                        lotes[id_prxlote] = s_aux1;
-                    }
-                    else
-                    {
-                        lotes[id_prxlote] += s_aux1;
-                    }
-                }
-            }
-            apontamentos.clear();
+          id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
         }
-    }
-    catch (...)
-    {
-        resetModule();
-    }
-}
+        //Serial.println("nao encontrou apontamente no ultimo lote");
+        if (lotes[id_prxlote] == ".")
+        {
+          lotes[id_prxlote] = s_aux1;
+          //Serial.println("gravou apontamento no lote e nao esta em contigencia");
+        }
+        else
+        {
+          lotes[id_prxlote] += s_aux1;
+          //Serial.println("gravou apontamento no lote e esta em contigencia");
+        }
+        //Nao esta em contigencia, ou atingiu o tamanho limite do lote
+        if ((clock() - tConfirmLote < TQL) || lotes[id_prxlote].length() > 255)
+        {
+          id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
+        }
 
+      }
+    }
+  }
+  catch (...)
+  {
+    resetModule();
+  }
+}
 
 void handlelog()
 {
@@ -849,12 +805,14 @@ void setupcoreZero(void *pvParameters)
     resetModule();
   }
 }
-
 void setup()
 {
   try
   {
     inicia_PinMode();
+    pinMode(ent_sensor, INPUT);
+    espera = false;
+
     Serial.begin(115200);
     Wire.begin(SDA, SCL);
     xTaskCreatePinnedToCore(setupcoreZero, "setupcoreZero", 8192, NULL, 0, NULL, 0);
@@ -881,13 +839,22 @@ void loop()
 
     timeNow = getTime_t();
     dataNow = localtime(&timeNow);
-
-    for (int i = 0; i < tam_slave; i++)
+    for (int i = 0; i < tam_slave && !espera; i++)
     {
       escravo(slave[i]);
       delay(200);
     }
-    gravaLote();
+    val_sensor = digitalRead(ent_sensor);
+    if (val_sensor == 0 && apontamentos.length() > 0)
+    {
+      gravaLote();
+      espera = true;
+    }
+    if (val_sensor == 1)
+      espera = false;
+
+    apontamentos.clear();
+
     delay(2);
     tLoop = millis() - tLoop;
   }
