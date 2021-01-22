@@ -25,10 +25,9 @@ bool estado[2] = {false, false};
 int pin_reset[2] = {rst_s0, rst_s1};
 int log_reset[2] = {0, 0};
 int val_sensor;
-bool espera;
 
 char dado[50];
-String apontamentos, inf_apt;
+String apontamentos, inf_apt, erros_apt;
 int conta = 0, ativo;
 
 int tam_slave = sizeof(slave) / sizeof(int);
@@ -46,6 +45,10 @@ long int loops = 0;
 String StatusWifi, s_aux = "", sinalWifi;
 String lotes[500] = {"", "", ""};
 bool dLote = true; // controla a quebra do lote para que data ini e data fim estejam no mesmo dia
+
+bool espera;
+int result;
+String aux_apt;
 
 const char *ssid = "WIFICABONNET";
 const char *password = "forcaf123";
@@ -546,122 +549,142 @@ void handleconfirmLotes()
   }
 }
 
-void gravaLote()
+int gravaLote()
 {
-  struct tm *dattime;
-  try
-  {
-    //if (timeServerDif > 0 && CD1 <= 0 ) { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
-    if (timeServerDif > 0)
-    { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
-      if (timeServerDif > (TQL / 1000))
-        timeServer = timeServer - (TQL / 1000);
-      else
-        timeServer = timeServer - timeServerDif;
-    }
-
-    if (timeServer != 0)
+    struct tm *dattime;
+    // 0 -> timer errado
+    // 1 -> todos os lotes cheio
+    // 2 -> gravado com sucesso
+    int grava = 0, cont = 0;
+    try
     {
-      // grava lote pois esta com data atualizada
-      if (timeFimLote == 0) // siginifica que a data atualizou a variavel timeServer pore ainda nao atualizou a variavel timeFimLote   ai vou calcular as datas para nao mandar 1970 porem todo o tempo que o esp ficar desligado nao tera atualizacao
-        timeIniLote = timeServer;
-      else
-        timeIniLote = timeFimLote;
-
-      //      if (timeServerDif< 0 && CD1 <= 0 ) { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
-      if (timeServerDif < 0)
-      { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
-        timeServerResetNullptr = timeServerAtuRn;
-        timeServer = timeServerAtu;
-        timeServerDif = 0;
-      }
-      timeFimLote = getTime_t();
-      dattime = localtime(&timeIniLote);
-      // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
-      if (id_prxlote == limiteVetor)
-      {
-        id_prxlote = 0;
-      }
-      dattime = localtime(&timeFimLote);
-      String s_aux1 = apontamentos + "|";
-      //o indice do lotes é maior que 0 E o s_aux1 tem o codigo de barras E o
-      //procura lotes nao encontrou esse codigo de barras no ultimo lote
-      if (s_aux1.length() > 1)
-      {
-        //atingiu o tamanho limite do lote
-        if (lotes[id_prxlote].length() + s_aux1.length() > 255)
-        {
-          id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
+        //if (timeServerDif > 0 && CD1 <= 0 ) { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
+        if (timeServerDif > 0)
+        { // a data do  ESP e maior entao devemos controlar a geracao dos lotes ate a data sincronizar
+            if (timeServerDif > (TQL / 1000))
+                timeServer = timeServer - (TQL / 1000);
+            else
+                timeServer = timeServer - timeServerDif;
         }
-        //Serial.println("nao encontrou apontamente no ultimo lote");
-        if (lotes[id_prxlote] == ".")
+
+        if (timeServer != 0)
         {
-          lotes[id_prxlote] = s_aux1;
-          //Serial.println("gravou apontamento no lote e nao esta em contigencia");
+            // grava lote pois esta com data atualizada
+            if (timeFimLote == 0) // siginifica que a data atualizou a variavel timeServer pore ainda nao atualizou a variavel timeFimLote   ai vou calcular as datas para nao mandar 1970 porem todo o tempo que o esp ficar desligado nao tera atualizacao
+                timeIniLote = timeServer;
+            else
+                timeIniLote = timeFimLote;
+
+            //      if (timeServerDif< 0 && CD1 <= 0 ) { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
+            if (timeServerDif < 0)
+            { // a data do schedule esta maior entao e sinal que a data do esp e menor e o ultimo lote tem data menor podendo ser atualizado
+                timeServerResetNullptr = timeServerAtuRn;
+                timeServer = timeServerAtu;
+                timeServerDif = 0;
+            }
+            timeFimLote = getTime_t();
+            dattime = localtime(&timeIniLote);
+            // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
+            if (id_prxlote == limiteVetor)
+            {
+                id_prxlote = 0;
+            }
+            dattime = localtime(&timeFimLote);
+            String s_aux1 = apontamentos + "|";
+            
+            while(lotes[id_prxlote].length() + s_aux1.length() > 541 && cont < 2)
+            {
+                id_prxlote = id_prxlote + 1;
+                if(id_prxlote == limiteVetor && lotes[id_prxlote].length() + s_aux1.length() > 541)
+                {
+                    id_prxlote = 0;
+                    cont++; //pois se contar mais de 1 vez significa que todos os lotes estao cheio
+                }
+            }
+            if(cont < 2)
+            {
+                //Serial.println("nao encontrou apontamente no ultimo lote");
+                if (lotes[id_prxlote] == ".")
+                {
+                    lotes[id_prxlote] = s_aux1;
+                    //Serial.println("gravou apontamento no lote e nao esta em contigencia");
+                }
+                else
+                {
+                    lotes[id_prxlote] += s_aux1;
+                    //Serial.println("gravou apontamento no lote e esta em contigencia");
+                }
+                //Nao esta em contigencia, ou atingiu o tamanho limite do lote
+                if ((clock() - tConfirmLote < TQL) || lotes[id_prxlote].length() > 541)
+                {
+                    id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
+                }
+                grava = 2;
+                erros_apt = "Apontamento realizado com sucesso";
+            }
+            else
+            {
+                grava = 1;
+                erros_apt = "Apontamento nao realizado pois todos os lotes estavam cheio";
+            }
         }
         else
         {
-          lotes[id_prxlote] += s_aux1;
-          //Serial.println("gravou apontamento no lote e esta em contigencia");
+            erros_apt = "Timer igual 0, fazer um getLog";
         }
-        //Nao esta em contigencia, ou atingiu o tamanho limite do lote
-        if ((clock() - tConfirmLote < TQL) || lotes[id_prxlote].length() > 255)
-        {
-          id_prxlote = id_prxlote + 1; //Atualiza o indice do lote
-        }
-
-      }
     }
-  }
-  catch (...)
-  {
-    resetModule();
-  }
+    catch (...)
+    {
+        resetModule();
+    }
+    return grava;
 }
 
 void handlelog()
 {
-  try
-  {
-    xSemaphoreTake(httpMutex, portMAX_DELAY);
-    String html = "";
-    int i = 0;
-    html += "<h1><BR>VARIAVEIS... </h1>";
-    /*########################################### VARIAVEIS DE CONFIGURACAO ################################################*/
-    html += "  millis()             =" + String(millis()) + "<br>";
-    //html += "  ipMaquina            =" + String(ETH.localIP()) + "<br>";
-    html += "  TQL                  =" + String(TQL) + "<br>";
-    html += "  c_aux                =" + String(c_aux) + "<br>";
-    html += "  s_aux                =" + String(s_aux) + "<br>";
-    html += "  id_prxlote           =" + String(id_prxlote) + "<br>";
-    html += " priFila               =" + String(priFila) + "<br>";
-    html += " loops                 =" + String(loops) + "<br>";
-    html += " tConfirmLote          =" + String(tConfirmLote) + "<br>";
-    html += " ttimeUltLote          =" + String(ttimeUltLote) + "<br>";
-    html += " timeServer            =" + String(timeServer) + "<br>";
-    html += " timeNow               =" + String(timeNow) + "<br>";
-    html += " timeFimLote           =" + String(timeFimLote) + "<br>";
-    html += " timeIniLote           =" + String(timeIniLote) + "<br>";
-    //html += " StatusWifi            =" + String(StatusWifi) + "<br>";
-    //html += " sinalWifi            =" + String(sinalWifi) + "<br>";
-    //VETORES
-    for (i = 0; i < limiteVetor; i++)
+    try
     {
-      if (lotes[i] != ".")
-      {
-        html += "lote[" + String(i) + "]    = " + lotes[i] + "<br>";
-      }
+        xSemaphoreTake(httpMutex, portMAX_DELAY);
+        String html = "";
+        int i = 0;
+        html += "<h1><BR>VARIAVEIS... </h1>";
+        /*########################################### VARIAVEIS DE CONFIGURACAO ################################################*/
+        html += "  millis()             =" + String(millis()) + "<br>";
+        //html += "  ipMaquina            =" + String(ETH.localIP()) + "<br>";
+        html += "  TQL                  =" + String(TQL) + "<br>";
+        html += "  c_aux                =" + String(c_aux) + "<br>";
+        html += "  s_aux                =" + String(s_aux) + "<br>";
+        html += "  id_prxlote           =" + String(id_prxlote) + "<br>";
+        html += " priFila               =" + String(priFila) + "<br>";
+        html += " loops                 =" + String(loops) + "<br>";
+        html += " tConfirmLote          =" + String(tConfirmLote) + "<br>";
+        html += " ttimeUltLote          =" + String(ttimeUltLote) + "<br>";
+        html += " timeServer            =" + String(timeServer) + "<br>";
+        html += " timeNow               =" + String(timeNow) + "<br>";
+        html += " timeFimLote           =" + String(timeFimLote) + "<br>";
+        html += " timeIniLote           =" + String(timeIniLote) + "<br>";
+        html += " Erros                 =" + erros_apt + "<br>";
+        //html += " StatusWifi            =" + String(StatusWifi) + "<br>";
+        //html += " sinalWifi            =" + String(sinalWifi) + "<br>";
+        //VETORES
+        for (i = 0; i < limiteVetor; i++)
+        {
+            if (lotes[i] != ".")
+            {
+                html += "lote[" + String(i) + "]    = " + lotes[i] + "<br>";
+            }
+        }
+
+        server.setContentLength(html.length());
+        server.send(20000, "text/html", html);
+
+        xSemaphoreGive(httpMutex);
+        erros_apt.clear();
     }
-
-    server.setContentLength(html.length());
-    server.send(20000, "text/html", html);
-
-    xSemaphoreGive(httpMutex);
-  }
-  catch (...)
-  {
-    resetModule();
-  }
+    catch (...)
+    {
+        resetModule();
+    }
 }
 
 void handleResetSlave()
@@ -805,12 +828,13 @@ void setupcoreZero(void *pvParameters)
     resetModule();
   }
 }
+
 void setup()
 {
   try
   {
     inicia_PinMode();
-    pinMode(ent_sensor, INPUT);
+    pinMode(ent_sensor, INPUT_PULLUP);
     espera = false;
 
     Serial.begin(115200);
@@ -839,21 +863,69 @@ void loop()
 
     timeNow = getTime_t();
     dataNow = localtime(&timeNow);
+
     for (int i = 0; i < tam_slave && !espera; i++)
     {
       escravo(slave[i]);
       delay(200);
     }
+
     val_sensor = digitalRead(ent_sensor);
-    if (val_sensor == 0 && apontamentos.length() > 0)
+    if ((val_sensor == 0 && apontamentos.length() > 0)) //Sensor Funcionando OK
     {
-      gravaLote();
+      result = gravaLote();
       espera = true;
     }
-    if (val_sensor == 1)
-      espera = false;
+    else //Sensor com Problema
+    {
+      if (apontamentos.length() > 0 && val_sensor == 1)
+      {
+        aux_apt = apontamentos;
+        aux_apt += "|";
+        if (id_prxlote > 0)
+        {
+          if (aux_apt != lotes[id_prxlote - 1])
+            result = gravaLote();
+        }
+        else
+        {
+          if (id_prxlote == 0)
+          {
+            if (aux_apt != lotes[limiteVetor])
+              result = gravaLote();
+          }
+          else
+          {
+            if (id_prxlote == limiteVetor)
+              if (aux_apt != lotes[0])
+                result = gravaLote();
+          }
+        }
+      }
+    }
 
-    apontamentos.clear();
+    /*if (result == 0)
+    {
+      Serial.println("Timer igual 0, fazer um getLog");
+    }
+    else
+    {
+      if (result == 1)
+      {
+        Serial.println("Apontamento nao realizado pois todos os lotes estavam cheios!");
+        //Disparar Alerta
+      }
+    }*/
+
+    if (val_sensor == 1)
+    {
+      espera = false;
+    }
+
+    if (apontamentos.length() > 0)
+    {
+      apontamentos.clear();
+    }
 
     delay(2);
     tLoop = millis() - tLoop;
