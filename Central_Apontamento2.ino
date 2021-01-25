@@ -218,6 +218,23 @@ void escravo(int slave)
   }
 }
 
+
+void envia_Sensor(int valor, int slave)
+{
+  int dado;
+  if(valor == 0)
+    dado = 2;
+  else
+  {
+    dado = 3;
+  }
+  Wire.beginTransmission(slave);   //abre a transmissao
+  Wire.write(dado);                   // pergunta se tem dado
+  Wire.endTransmission(); //fecha a transmissao e confirma que o maix bit esta vivo
+  
+}
+
+
 /*WatchDog*/
 void IRAM_ATTR resetModule() //funcao que o temporizador ira chamar, para reiniciar o ESP32
 {
@@ -864,20 +881,26 @@ void loop()
     timeNow = getTime_t();
     dataNow = localtime(&timeNow);
 
-    for (int i = 0; i < tam_slave && !espera; i++)
+    val_sensor = digitalRead(ent_sensor);
+    for (int i = 0; i < tam_slave; i++)
     {
-      escravo(slave[i]);
-      delay(200);
+      envia_Sensor(val_sensor, slave[i]);
     }
 
-    val_sensor = digitalRead(ent_sensor);
-    if ((val_sensor == 0 && apontamentos.length() > 0)) //Sensor Funcionando OK
+    if(!espera)
+    {
+      escravo(slave[0]);
+      escravo(slave[1]);
+    }
+
+    if (val_sensor == 0 && apontamentos.length() > 0) //Sensor Funcionando OK
     {
       result = gravaLote();
       espera = true;
     }
     else //Sensor com Problema
     {
+      
       if (apontamentos.length() > 0 && val_sensor == 1)
       {
         aux_apt = apontamentos;
@@ -922,12 +945,10 @@ void loop()
       espera = false;
     }
 
-    if (apontamentos.length() > 0)
-    {
-      apontamentos.clear();
-    }
+    apontamentos.clear();
 
-    delay(2);
+    
+    delay(200);
     tLoop = millis() - tLoop;
   }
   catch (...)
