@@ -602,7 +602,7 @@ int gravaLote()
             timeFimLote = getTime_t();
             dattime = localtime(&timeIniLote);
             // limite do vetor cheio, porem primeiro vetor liberado, aponta novamente para o primeiro vetor
-            if (id_prxlote == limiteVetor)
+            if (id_prxlote >= limiteVetor)
             {
                 id_prxlote = 0;
             }
@@ -853,9 +853,9 @@ void setup()
     inicia_PinMode();
     pinMode(ent_sensor, INPUT_PULLUP);
     Serial.begin(115200);
-    pinMode(SDA, INPUT_PULLUP);
-    pinMode(SCL, INPUT_PULLUP);
-    Wire.begin(SDA, SCL);
+    pinMode(SDA, INPUT);
+    pinMode(SCL, INPUT);
+    Wire.begin(SDA, SCL, 400000);
     espera = false;
     xTaskCreatePinnedToCore(setupcoreZero, "setupcoreZero", 8192, NULL, 0, NULL, 0);
     // configura WatchDog
@@ -866,6 +866,8 @@ void setup()
     resetModule();
   }
 }
+
+
 
 void loop()
 {
@@ -880,10 +882,21 @@ void loop()
     timeNow = getTime_t();
     dataNow = localtime(&timeNow);
     val_sensor = digitalRead(ent_sensor);
-    for (int i = 0; i < tam_slave; i++)
+     
+    /*for(int i = 0; i < tam_slave; i++)
     {
       envia_Sensor(val_sensor, slave[i]);
+      delay(50);
     }
+    for(int i = 0; i < tam_slave && !espera; i++)
+    {
+      escravo(slave[i]);
+      delay(100);
+    }*/
+    envia_Sensor(val_sensor, slave[0]);
+    delay(50);
+    envia_Sensor(val_sensor, slave[1]);
+    delay(50);
     if (!espera)
     {
       escravo(slave[0]);
@@ -891,6 +904,7 @@ void loop()
       escravo(slave[1]);
       delay(100);
     }
+    
     if (val_sensor == 0 && apontamentos.length() > 0) //Sensor Funcionando OK
     {
       result = gravaLote();
