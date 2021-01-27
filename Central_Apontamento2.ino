@@ -40,7 +40,7 @@ int ip[] = {0, 0, 0, 0};
 int gateway[] = {0, 0, 0, 0};
 int subnet[] = {0, 0, 0, 0};
 // TQL - tempo que define a quebra de lotes
-int id_prxlote = 0, priFila = 0, TQL = 60000, limiteVetor = 500;
+int id_prxlote = 0, priFila = 0, TQL = 60000, limiteVetor = 5;
 long int loops = 0;
 String StatusWifi, s_aux = "", sinalWifi;
 String lotes[500] = {"", "", ""};
@@ -852,10 +852,11 @@ void setup()
   {
     inicia_PinMode();
     pinMode(ent_sensor, INPUT_PULLUP);
-    espera = false;
-
     Serial.begin(115200);
+    pinMode(SDA, INPUT_PULLUP);
+    pinMode(SCL, INPUT_PULLUP);
     Wire.begin(SDA, SCL);
+    espera = false;
     xTaskCreatePinnedToCore(setupcoreZero, "setupcoreZero", 8192, NULL, 0, NULL, 0);
     // configura WatchDog
     setupWatchDog();
@@ -872,27 +873,24 @@ void loop()
   {
     tLoop = millis();
     loopWatchDog();
-
     if (loops == 0)
     {
       loops = millis();
     }
-
     timeNow = getTime_t();
     dataNow = localtime(&timeNow);
-
     val_sensor = digitalRead(ent_sensor);
     for (int i = 0; i < tam_slave; i++)
     {
       envia_Sensor(val_sensor, slave[i]);
     }
-
-    if(!espera)
+    if (!espera)
     {
       escravo(slave[0]);
+      delay(100);
       escravo(slave[1]);
+      delay(100);
     }
-
     if (val_sensor == 0 && apontamentos.length() > 0) //Sensor Funcionando OK
     {
       result = gravaLote();
@@ -900,10 +898,11 @@ void loop()
     }
     else //Sensor com Problema
     {
-      
       if (apontamentos.length() > 0 && val_sensor == 1)
       {
-        aux_apt = apontamentos;
+        result = gravaLote();
+        //Nao tenho certeza se precisa! VERIFICAR COM O ANGELO
+        /*aux_apt = apontamentos;
         aux_apt += "|";
         if (id_prxlote > 0)
         {
@@ -923,10 +922,9 @@ void loop()
               if (aux_apt != lotes[0])
                 result = gravaLote();
           }
-        }
+        }*/
       }
     }
-
     /*if (result == 0)
     {
       Serial.println("Timer igual 0, fazer um getLog");
@@ -939,16 +937,12 @@ void loop()
         //Disparar Alerta
       }
     }*/
-
     if (val_sensor == 1)
     {
       espera = false;
     }
-
     apontamentos.clear();
-
-    
-    delay(200);
+    delay(100);
     tLoop = millis() - tLoop;
   }
   catch (...)
